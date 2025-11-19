@@ -4,42 +4,37 @@ import random
 import torch
 import pennylane as qml
 
-# Quantum variables
-n_qubits = 5  # Total number of qubits / N
-n_a_qubits = 1  # Number of ancillary qubits / N_A
-q_depth = 6  # Depth of the parameterised quantum circuit / D
-n_generators = 4  # Number of subgenerators for the patch method / N_G
+def quantum_circuit(noise, weights, n_qubits, q_depth):
+    """Quantum circuit function. Creates device dynamically based on n_qubits."""
+    # Create device dynamically
+    dev = qml.device("lightning.qubit", wires=n_qubits)
+    
+    @qml.qnode(dev, diff_method="parameter-shift")
+    def _circuit(noise, weights, n_qubits, q_depth):
+        weights = weights.reshape(q_depth, n_qubits)
 
-# Quantum simulator
-dev = qml.device("lightning.qubit", wires=n_qubits)
-# Enable CUDA device if available
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # Initialise latent vectors
+        for i in range(n_qubits):
+            qml.RY(noise[i], wires=i)
 
-@qml.qnode(dev, diff_method="parameter-shift")
-def quantum_circuit(noise, weights):
+        # Repeated layer
+        for i in range(q_depth):
+            # Parameterised layer
+            for y in range(n_qubits):
+                qml.RY(weights[i][y], wires=y)
 
-    weights = weights.reshape(q_depth, n_qubits)
+            # Control Z gates
+            for y in range(n_qubits - 1):
+                qml.CZ(wires=[y, y + 1])
 
-    # Initialise latent vectors
-    for i in range(n_qubits):
-        qml.RY(noise[i], wires=i)
-
-    # Repeated layer
-    for i in range(q_depth):
-        # Parameterised layer
-        for y in range(n_qubits):
-            qml.RY(weights[i][y], wires=y)
-
-        # Control Z gates
-        for y in range(n_qubits - 1):
-            qml.CZ(wires=[y, y + 1])
-
-    return qml.probs(wires=list(range(n_qubits)))
+        return qml.probs(wires=list(range(n_qubits)))
+    
+    return _circuit(noise, weights, n_qubits, q_depth)
 
 
 # https://discuss.pennylane.ai/t/ancillary-subsystem-measurement-then-trace-out/1532
-def partial_measure(noise, weights):
-    probs = quantum_circuit(noise, weights)
+def partial_measure(noise, weights, n_qubits, q_depth, n_a_qubits):
+    probs = quantum_circuit(noise, weights, n_qubits, q_depth)
     probsgiven0 = probs[: (2 ** (n_qubits - n_a_qubits))]
     probsgiven0 /= torch.sum(probs)
 
