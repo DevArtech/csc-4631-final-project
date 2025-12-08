@@ -5,7 +5,7 @@ import torch.nn as nn
 from qcircuit import quantum_circuit, partial_measure
 
 class PatchQuantumGenerator(nn.Module):
-    """Conditional Quantum generator class with classical post-processing"""
+    """Conditional Quantum generator class with strong class conditioning to prevent mode collapse"""
 
     def __init__(self, n_generators, n_qubits, q_depth, n_a_qubits, num_classes=10, q_delta=1):
         """
@@ -28,37 +28,50 @@ class PatchQuantumGenerator(nn.Module):
         
         # Calculate output size from quantum circuit
         self.patch_size = 2 ** (n_qubits - n_a_qubits)
-        self.quantum_output_size = n_generators * self.patch_size  # 64 for default config
+        self.quantum_output_size = n_generators * self.patch_size
 
         # Quantum circuit parameters for each sub-generator
+        # Initialize with wider spread for more diverse starting point
         self.q_params = nn.ParameterList(
             [
-                nn.Parameter(q_delta * torch.rand(q_depth * n_qubits), requires_grad=True)
+                nn.Parameter(q_delta * torch.rand(q_depth * n_qubits) * 2 - q_delta, requires_grad=True)
                 for _ in range(n_generators)
             ]
         )
         
-        # Class embedding network: maps class labels to angles for quantum circuit
-        # Output: n_qubits * 2 angles (for RX and RZ rotations)
-        # Single shared embedding - balanced for stable training
-        self.class_embedding = nn.Sequential(
-            nn.Linear(num_classes, 32),
+        # Deeper class embedding with skip connection for stronger conditioning
+        # This helps prevent the generator from ignoring class information
+        self.class_embed_hidden = 64
+        self.class_embedding_1 = nn.Sequential(
+            nn.Linear(num_classes, self.class_embed_hidden),
             nn.LeakyReLU(0.2),
-            nn.Linear(32, 64),
+        )
+        self.class_embedding_2 = nn.Sequential(
+            nn.Linear(self.class_embed_hidden, self.class_embed_hidden),
             nn.LeakyReLU(0.2),
-            nn.Linear(64, n_qubits * 2),
+        )
+        self.class_to_angles = nn.Sequential(
+            nn.Linear(self.class_embed_hidden, n_qubits * 2),
             nn.Tanh()  # Output in [-1, 1], will scale to angles
         )
         
-        # Classical post-processing: transforms quantum output + class info into final image
-        # This gives the model more expressibility while keeping quantum core
-        self.post_process = nn.Sequential(
-            nn.Linear(self.quantum_output_size + num_classes, 128),
+        # Separate class embedding for post-processing (prevents mode collapse)
+        self.class_embed_post = nn.Sequential(
+            nn.Linear(num_classes, 32),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm1d(128),
+            nn.Linear(32, 32),
+            nn.LeakyReLU(0.2),
+        )
+        
+        # Classical post-processing WITHOUT BatchNorm (can cause mode collapse with small batches)
+        # Uses LayerNorm instead for stable training without batch dependencies
+        self.post_process = nn.Sequential(
+            nn.Linear(self.quantum_output_size + 32, 128),  # 32 from class embedding
+            nn.LeakyReLU(0.2),
+            nn.LayerNorm(128),
             nn.Linear(128, 128),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm1d(128),
+            nn.LayerNorm(128),
             nn.Linear(128, 64),
             nn.Tanh()  # Output in [-1, 1] to match image range
         )
@@ -75,8 +88,10 @@ class PatchQuantumGenerator(nn.Module):
         device = noise.device
         batch_size = noise.size(0)
         
-        # Embed class labels to angles scaled to [-pi, pi] for rotation gates
-        class_angles = self.class_embedding(labels) * math.pi  # (batch_size, n_qubits * 2)
+        # Deep class embedding with residual connection for stronger conditioning
+        class_hidden = self.class_embedding_1(labels)
+        class_hidden = class_hidden + self.class_embedding_2(class_hidden)  # Skip connection
+        class_angles = self.class_to_angles(class_hidden) * math.pi  # Scale to [-pi, pi]
 
         # Generate quantum features
         quantum_features = torch.Tensor(batch_size, 0).to(device)
@@ -97,8 +112,11 @@ class PatchQuantumGenerator(nn.Module):
 
             quantum_features = torch.cat((quantum_features, patches), 1)
         
-        # Concatenate quantum features with class labels for strong conditioning
-        combined = torch.cat([quantum_features, labels], dim=1)
+        # Separate class embedding for post-processing (stronger conditioning)
+        class_post_features = self.class_embed_post(labels)
+        
+        # Concatenate quantum features with processed class features
+        combined = torch.cat([quantum_features, class_post_features], dim=1)
         
         # Post-process to generate final image
         images = self.post_process(combined)
