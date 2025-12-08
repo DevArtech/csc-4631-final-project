@@ -4,8 +4,8 @@ import pennylane as qml
 
 def quantum_circuit(noise, class_angles, weights, n_qubits, q_depth):
     """
-    Efficient conditional quantum circuit.
-    Class conditioning applied once at start, then parameterized layers.
+    Strongly-conditioned quantum circuit with class info injected at every layer.
+    This prevents class information from being "washed out" and reduces mode collapse.
     
     Args:
         noise: Latent noise vector of shape (n_qubits,)
@@ -22,21 +22,29 @@ def quantum_circuit(noise, class_angles, weights, n_qubits, q_depth):
         class_rx = class_angles[:n_qubits]
         class_rz = class_angles[n_qubits:]
 
-        # Initial encoding: noise + class conditioning (applied once)
+        # Initial encoding: noise + class conditioning
         for i in range(n_qubits):
             qml.RY(noise[i], wires=i)
             qml.RX(class_rx[i], wires=i)
             qml.RZ(class_rz[i], wires=i)
 
-        # Parameterized layers with entanglement
+        # Parameterized layers with entanglement AND repeated class conditioning
         for layer in range(q_depth):
-            # Entanglement
+            # Entanglement - use ring topology for better expressibility
             for y in range(n_qubits - 1):
                 qml.CZ(wires=[y, y + 1])
+            # Close the ring (last to first qubit)
+            qml.CZ(wires=[n_qubits - 1, 0])
             
             # Parameterised rotations
             for y in range(n_qubits):
                 qml.RY(weights[layer][y], wires=y)
+            
+            # Re-inject class conditioning at each layer (scaled by layer depth)
+            # This prevents class info from being lost in deeper layers
+            scale = 0.5 / (layer + 1)  # Diminishing but persistent class influence
+            for y in range(n_qubits):
+                qml.RZ(class_rz[y] * scale, wires=y)
 
         return qml.probs(wires=list(range(n_qubits)))
     
