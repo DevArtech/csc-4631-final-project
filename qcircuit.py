@@ -1,3 +1,25 @@
+"""
+File: quantum_generator.py
+
+Purpose:
+This file defines the strongly-conditioned quantum circuit used as the generator
+core for a Conditional Quantum Generative Adversarial Network (QGAN). It implements
+a parameterized multi-layer quantum circuit that injects class-conditioning
+information at every depth level to prevent feature washout and reduce mode collapse.
+The file also includes a partial measurement routine that traces out ancillary
+qubits while preserving output probability variance for stable training.
+
+Key Components:
+- Strongly-conditioned quantum circuit with repeated class injection
+- Ring-topology entanglement for improved expressibility
+- Parameter-shift differentiation for hybrid quantum-classical training
+- Partial measurement for marginal probability extraction
+
+Intended Use:
+This module is used by the Conditional QGAN training pipeline to generate
+class-conditioned probability distributions that are later mapped to image space.
+"""
+
 # Library imports
 import torch
 import pennylane as qml
