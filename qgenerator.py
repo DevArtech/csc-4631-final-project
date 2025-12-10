@@ -3,7 +3,7 @@ File: patch_quantum_generator.py
 
 Purpose:
 This file defines the PatchQuantumGenerator class, a strongly class-conditioned
-hybrid quantum–classical generator used in a Conditional Quantum GAN (QGAN).
+hybrid quantum-classical generator used in a Conditional Quantum GAN (QGAN).
 The generator employs multiple parameterized quantum sub-generators ("patches")
 to produce quantum feature maps, which are then combined with deep class
 embeddings and post-processed through a classical neural network to generate
@@ -14,7 +14,7 @@ Key Features:
 - Strong class conditioning with deep embeddings and residual connections
 - Repeated class injection to prevent mode collapse
 - LayerNorm-based classical post-processing for stability with small batch sizes
-- Hybrid quantum–classical architecture for conditional image synthesis
+- Hybrid quantum-classical architecture for conditional image synthesis
 
 Intended Use:
 This module serves as the primary generator component in the Conditional QGAN
